@@ -70,6 +70,10 @@ function build_one
 --extra-cflags="-Os -fpic $ADDI_CFLAGS" \
 --extra-ldflags="$ADDI_LDFLAGS" \
 $ADDITIONAL_CONFIGURE_FLAG
+
+make clean
+make -j4
+make install
 }
 
 build_one
