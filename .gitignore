@@ -1,0 +1,9 @@
+# compiler generate files
+*.o
+*.obj
+
+#image files
+*.bin
+*.BIN
+*.bit
+
