@@ -1388,11 +1388,33 @@ static int __get_type_size(char *type)
     return -1;
 }
 
+static char __num_to_ascii(uint8_t b)
+{
+    return (b > 9) ? (b - 10 + 'A') : (b + '0');
+}
+
+static void __int_to_string(uint32_t val, int bytes, char *buf, uint32_t *len)
+{
+    char *p = buf;
+    uint32_t v = val;
+    uint8_t *s = (uint8_t *)&v;
+
+    *len = bytes * 2 + 3;
+    *p++ = '0';
+    *p++ = 'x';
+    while (bytes--) {
+        *p++ = __num_to_ascii((s[bytes] & 0xF0) >> 4);
+        *p++ = __num_to_ascii(s[bytes] & 0x0F);
+    }
+    *p++ = '\n';
+}
+
 static int __readval(FILE *src, FILE *dst, uint32_t offset, char *type)
 {
     int type_size = __get_type_size(type);
     uint8_t tmp_buf[4] = {0, 0, 0, 0};
-    uint32_t val;
+    char str[16];
+    uint32_t val, str_len;
     size_t rw_len;
 
     if (type_size < 0) {
@@ -1417,14 +1439,14 @@ static int __readval(FILE *src, FILE *dst, uint32_t offset, char *type)
 
     if (dst) {
         fseek(dst, 0, SEEK_SET);
-        rw_len = fwrite((uint8_t *)&val, 1, type_size, dst);
-        if (rw_len != type_size) {
-            printf("#>write data to dest_file failed[wanted:%d,actual:%ld]!\n", type_size, rw_len);
+        __int_to_string(val, type_size, str, &str_len);
+        rw_len = fwrite(str, 1, str_len, dst);
+        if (rw_len != str_len) {
+            printf("#>write data to dest_file failed[wanted:%d,actual:%ld]!\n", str_len, rw_len);
             return -1;
         }
     }
 
-    printf("$>success!\n");
     return 0;
 }
 
