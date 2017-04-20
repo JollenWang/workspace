@@ -194,6 +194,8 @@ static void show_arguments(struct arguments *args)
     printf("operation   : %s\n", args->operation);
     printf("base addr   : 0x%08X\n", args->base_address);
     printf("size        : 0x%08X, %d\n", args->size, args->size);
+    if (args->string)
+        printf("string      : %s\n", args->string);
 }
 
 DECLARE_LONG_OPTIONS(read2file) = {
@@ -1286,6 +1288,173 @@ __exit0:
     pi = ptbl->list;
     for (i = 0; i < ptbl->count; i++, pi++)
         fclose(pi->fp);
+
+    return ret;
+}
+
+DECLARE_LONG_OPTIONS(readval) = {
+    {"help",      no_argument,         NULL, 'h'},
+    {"input",     required_argument,   NULL, 'i'},
+    {"output",    required_argument,   NULL, 'o'},
+    {"base_addr", required_argument,   NULL, 'b'},
+    {"type",      required_argument,   NULL, 't'},
+    {0,           0,                   0,    0  },
+};
+
+DECLARE_FUNC_VARIABLES(readval, "hi:o:b:t:", "read value from the specific address and print out or save to file");
+
+void readval_helper(FILE *s, struct function *self)
+{
+    fprintf(s, "usage  : ./image+ --readval -i INPUT -b START_ADDR -t TYPE [-o OUTPUT]\n");
+    fprintf(s, "      -h --help           show this usage.\n");
+    fprintf(s, "      -i                  specific the input file name.\n");
+    fprintf(s, "      -o                  specific the output file name.\n");
+    fprintf(s, "      -b                  specific the base address.\n");
+    fprintf(s, "      -t                  specific the read value type: char/short/int.\n");
+}
+
+int readval_parse_option(int argc, char **argv, struct arguments *args)
+{
+    struct function *self = (struct function *)args->owner;
+    const char *const s_options = self->short_options;
+    const struct option *l_options = self->long_options;
+    int c, option_index;
+
+    if (argc < 3) {
+        printf("invalid arguments!\n");
+        read2file_helper(stdout, self);
+        exit(-1);
+    }
+
+    while (1) {
+        c = getopt_long(argc, argv, s_options, l_options, &option_index);
+        if (c == -1)    /*all options are analyse done*/
+            break;
+
+        switch(c) {
+        case 'h':
+            readval_helper(stdout, self);
+            exit(0);
+
+        case 'i':
+            args->input = optarg;
+            continue;
+
+        case 'o':
+            args->output = optarg;
+            continue;
+
+        case 'b':
+            if (str2word(optarg, &args->base_address) < 0) {
+                printf("#>invalid base address:%s\n", optarg);
+                exit(-1);
+            }
+            continue;
+
+        case 't':
+            args->string = optarg;
+            continue;
+
+        default:
+            break;
+        }
+    }
+
+    if (!args->input) {
+        printf("#>no input file specified!\n");
+        exit(-1);
+    }
+
+    if (access(args->input, 0)) {
+        printf("#>%s is no access!\n", args->input);
+        exit(-1);
+    }
+
+    //show_arguments(args);
+    return 0;
+}
+
+static int __get_type_size(char *type)
+{
+    if (!strncmp("int", type, strlen("int")))
+        return sizeof(unsigned int);
+
+    if (!strncmp("short", type, strlen("short")))
+        return sizeof(unsigned short);
+
+    if (!strncmp("char", type, strlen("char")))
+        return sizeof(unsigned char);
+
+    return -1;
+}
+
+static int __readval(FILE *src, FILE *dst, uint32_t offset, char *type)
+{
+    int type_size = __get_type_size(type);
+    uint8_t tmp_buf[4] = {0, 0, 0, 0};
+    uint32_t val;
+    size_t rw_len;
+
+    if (type_size < 0) {
+        printf("#>get size of type %s failed!\n", type);
+        return -1;
+    }
+
+    fseek(src, offset, SEEK_SET);
+    rw_len = fread(tmp_buf, 1, type_size, src);
+    if (rw_len != type_size) {
+        printf("#>read data from src_file failed[wanted:%d,actual:%ld]!\n", type_size, rw_len);
+        return -1;
+    }
+
+    val = *((uint32_t *)tmp_buf);
+    if (type_size == 1)
+        printf("[READ %08X]: %02X\n", offset, val);
+    else if (type_size == 2)
+        printf("[READ %08X]: %04X\n", offset, val);
+    else
+        printf("[READ %08X]: %08X\n", offset, val);
+
+    if (dst) {
+        fseek(dst, 0, SEEK_SET);
+        rw_len = fwrite((uint8_t *)&val, 1, type_size, dst);
+        if (rw_len != type_size) {
+            printf("#>write data to dest_file failed[wanted:%d,actual:%ld]!\n", type_size, rw_len);
+            return -1;
+        }
+    }
+
+    printf("$>success!\n");
+    return 0;
+}
+
+
+int readval_proc(struct arguments *arg)
+{
+    FILE *fsrc, *fdst = NULL;
+    size_t fsize;
+    int ret = 0;
+
+    fsrc = fopen(arg->input, "rb");
+    assert(fsrc != NULL);
+    if (arg->output) {
+        fdst = fopen(arg->output, "w+");
+        assert(fdst != NULL);
+    }
+
+    fsize = __get_fsize(fsrc);
+    if (arg->base_address + arg->size > fsize) {
+        printf("$>%s():read 0x%X bytes from address 0x%08X is out of file size 0x%08lX!\n", 
+            __func__, arg->size, arg->base_address, fsize);
+        ret = -1;
+        goto __exit;
+    }
+    ret = __readval(fsrc, fdst, arg->base_address, arg->string);
+
+__exit:
+    if (fdst)
+        fclose(fdst);
+    fclose(fsrc);
 
     return ret;
 }

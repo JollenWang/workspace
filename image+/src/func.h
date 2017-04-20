@@ -80,6 +80,7 @@ DECLARE_FUNC(create);
 DECLARE_FUNC(padding);
 DECLARE_FUNC(resize);
 DECLARE_FUNC(combine);
+DECLARE_FUNC(readval);
 
 
 #ifdef  __cplusplus
