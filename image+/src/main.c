@@ -36,6 +36,7 @@ static struct function f_lst[] = {
     REGISTER_FUNC(3, "resize",      resize,     'R'),
     REGISTER_FUNC(4, "combine",     combine,    'C'),
     REGISTER_FUNC(5, "readval",     readval,    'R' + 'D' + 'V'),
+    REGISTER_FUNC(6, "filesize",    filesize,   'F' + 'Z'),
 /*
     {0,  "split",    "hi:o:b:s:", NULL, 'S',              common_porc, helper_func, "split file to specific size"},
     {2, "read2file", read2file_sopts, read2file_lopts, 'R'+'D', read2file_parse_option, read2file_proc, read2file_helper, read2file_comments},

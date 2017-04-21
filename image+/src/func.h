@@ -81,6 +81,7 @@ DECLARE_FUNC(padding);
 DECLARE_FUNC(resize);
 DECLARE_FUNC(combine);
 DECLARE_FUNC(readval);
+DECLARE_FUNC(filesize);
 
 
 #ifdef  __cplusplus

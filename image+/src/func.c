@@ -21,29 +21,35 @@
 #include "main.h"
 #include "crc.h"
 
-
-//-------------------------------------------------------------------------------------------
-
-/*
-static int SUM(const char *str)
-{
-    char *p = str;
-    int sum = 0;
-
-    while(*p != '\0') {
-        sum += *p;
-        p++;
-    }
-
-    return sum;
-}
-*/
-
 #define MAX_NUMERICAL_PARAM_LEN     10
 #define IS_IN_a_TO_f(c) (((c) >= 'a') && ((c) <= 'f'))
 #define IS_IN_A_TO_F(c) (((c) >= 'A') && ((c) <= 'F'))
 #define IS_IN_0_TO_9(c) (((c) >= '0') && ((c) <= '9'))
 
+static char *SIZE_TO_HUMAN_READABLE(uint32_t size)
+{
+#define S_KB    1024
+#define S_MB    (S_KB * 1024)
+#define S_GB    (S_MB * 1024)
+    static char vb[64];
+    uint32_t GB = size / S_GB;
+    uint32_t MB = (size % S_GB) / S_MB;
+    uint32_t KB = (size % S_MB) / S_KB;
+    uint32_t BYTES = (size % S_KB);
+    int c = 0;
+
+    memset(vb, 0, sizeof(vb));
+    if (GB)
+        c += snprintf(vb, sizeof(vb), "%dGB.", GB);
+    if (MB)
+        c += snprintf(vb + c, sizeof(vb) - c, "%dMB.", MB);
+    if (KB)
+        c += snprintf(vb + c, sizeof(vb) - c, "%dKB.", KB);
+    if (BYTES)
+        c += snprintf(vb + c, sizeof(vb) - c, "%dBytes", BYTES);
+
+    return vb;
+}
 
 static int __find_numerical_start(char *str, int str_len, int *start_pos, int *is_hex)
 {
@@ -194,6 +200,8 @@ static void show_arguments(struct arguments *args)
     printf("operation   : %s\n", args->operation);
     printf("base addr   : 0x%08X\n", args->base_address);
     printf("size        : 0x%08X, %d\n", args->size, args->size);
+    if (args->private)
+        printf("private     : %d\n", args->private);
     if (args->string)
         printf("string      : %s\n", args->string);
 }
@@ -204,20 +212,21 @@ DECLARE_LONG_OPTIONS(read2file) = {
     {"output",    required_argument,   NULL, 'o'},
     {"base_addr", required_argument,   NULL, 'b'},
     {"size",      required_argument,   NULL, 's'},
+    {"Word",      no_argument,         NULL, 'W'},
     {0,           0,                   0,    0  },
 };
 
-DECLARE_FUNC_VARIABLES(read2file, "hi:o:b:s:", "read specific size data from specific file and write to target file");
+DECLARE_FUNC_VARIABLES(read2file, "hi:o:b:s:W", "read specific size data from specific file and write to target file");
 
 void read2file_helper(FILE *s, struct function *self)
 {
-    //fprintf(s, "$>%s helper function called!\n", self->caption);
-    fprintf(s, "usage  : ./image+ --read2file -b START_ADDR -s SIZE -i INPUT -o OUTPUT\n");
-    fprintf(s, "      -h --help           show this usage.\n");
-    fprintf(s, "      -i                  specific the input file name.\n");
-    fprintf(s, "      -o                  specific the output file name.\n");
-    fprintf(s, "      -b                  specific the base address.\n");
-    fprintf(s, "      -s                  specific the size start from base address.\n");
+    fprintf(s, "usage  : ./image+ --read2file -i INPUT -b START_ADDR -s SIZE [-W] -o OUTPUT\n");
+    fprintf(s, "      -h --help         show this usage.\n");
+    fprintf(s, "      -i --input        specific the input file name.\n");
+    fprintf(s, "      -o --output       specific the output file name.\n");
+    fprintf(s, "      -b --base_addr    specific the base address.\n");
+    fprintf(s, "      -s --size         specific the size start from base address.\n");
+    fprintf(s, "      -W --Word         set the base and size value unit as word.\n");
 }
 
 int read2file_parse_option(int argc, char **argv, struct arguments *args)
@@ -233,6 +242,7 @@ int read2file_parse_option(int argc, char **argv, struct arguments *args)
         exit(-1);
     }
 
+    args->private = 1;  /*offset and size value unit, default is byte*/
     while (1) {
         c = getopt_long(argc, argv, s_options, l_options, &option_index);
         if (c == -1)    /*all options are analyse done*/
@@ -265,6 +275,9 @@ int read2file_parse_option(int argc, char **argv, struct arguments *args)
             }
             continue;
 
+        case 'W':
+            args->private = 4;  /*offset and size value unit set as word*/
+
         default:
             break;
         }
@@ -294,6 +307,8 @@ int read2file_proc(struct arguments *arg)
     FILE *fdst;
     size_t fsize;
     int ret = 0;
+    uint32_t offset = arg->base_address * arg->private;
+    uint32_t rd_size = arg->size * arg->private;
 
     fsrc = fopen(arg->input, "rb");
     assert(fsrc != NULL);
@@ -301,15 +316,15 @@ int read2file_proc(struct arguments *arg)
     assert(fdst != NULL);
 
     fsize = __get_fsize(fsrc);
-    if (arg->base_address + arg->size > fsize) {
+    if (offset + rd_size > fsize) {
         printf("$>%s():read 0x%X bytes from address 0x%08X is out of file size 0x%08lX!\n", 
-            __func__, arg->size, arg->base_address, fsize);
+            __func__, rd_size, offset, fsize);
         ret = -1;
         goto __exit;
     }
 
     fseek(fdst, 0, SEEK_SET);
-    ret = __file_copy(fdst, fsrc,arg->base_address, arg->size);
+    ret = __file_copy(fdst, fsrc, offset, rd_size);
 
 __exit:
     fclose(fdst);
@@ -1472,6 +1487,174 @@ int readval_proc(struct arguments *arg)
         goto __exit;
     }
     ret = __readval(fsrc, fdst, arg->base_address, arg->string);
+
+__exit:
+    if (fdst)
+        fclose(fdst);
+    fclose(fsrc);
+
+    return ret;
+}
+
+DECLARE_LONG_OPTIONS(filesize) = {
+    {"help",      no_argument,         NULL, 'h'},
+    {"input",     required_argument,   NULL, 'i'},
+    {"output",    required_argument,   NULL, 'o'},
+    {"hex",       no_argument,         NULL, 'H'},
+    {"decimal",   no_argument,         NULL, 'D'},
+    {"human",     no_argument,         NULL, 'M'},
+    {0,           0,                   0,    0  },
+};
+
+DECLARE_FUNC_VARIABLES(filesize, "hi:o:HDM", "get the specific file's size and output with a specific format");
+
+static void __show_filesize_arguments(struct arguments *args)
+{
+    printf("input       : %s\n", args->input);
+    printf("output      : %s\n", args->output);
+    printf("operation   : %s\n", args->operation);
+    switch (args->private) {
+    case 'H':
+        printf("format      : Hexadecimal\n");
+        break;
+
+    case 'M':
+        printf("format      : Human readable\n");
+        break;
+
+    case 'D':
+    default:
+        printf("format      : Decimal\n");
+        break;
+    }
+}
+
+void filesize_helper(FILE *s, struct function *self)
+{
+    fprintf(s, "usage : ./image+ --filesize -i INPUT [-H/D/M] [-o OUTPUT]\n");
+    fprintf(s, "      -h --help        show this usage.\n");
+    fprintf(s, "      -i --input       specific the input file name.\n");
+    fprintf(s, "      -o --output      specific the output file name.\n");
+    fprintf(s, "      -H --hex         output value in hexadecimal format.\n");
+    fprintf(s, "      -D --decimal     output value in decimal format.\n");
+    fprintf(s, "      -M --human       output value in human readable format.\n");
+}
+
+int filesize_parse_option(int argc, char **argv, struct arguments *args)
+{
+    struct function *self = (struct function *)args->owner;
+    const char *const s_options = self->short_options;
+    const struct option *l_options = self->long_options;
+    int c, option_index;
+
+    if (argc < 3) {
+        printf("invalid arguments!\n");
+        filesize_helper(stdout, self);
+        exit(-1);
+    }
+
+    args->private = 'D';    /*default*/
+    while (1) {
+        c = getopt_long(argc, argv, s_options, l_options, &option_index);
+        if (c == -1)    /*all options are analyse done*/
+            break;
+
+        switch(c) {
+        case 'h':
+            filesize_helper(stdout, self);
+            exit(0);
+
+        case 'i':
+            args->input = optarg;
+            continue;
+
+        case 'o':
+            args->output = optarg;
+            continue;
+
+        case 'H':
+        case 'D':
+        case 'M':
+            args->private = c;
+            continue;
+
+        default:
+            break;
+        }
+    }
+
+    if (!args->input) {
+        printf("#>no input file specified!\n");
+        exit(-1);
+    }
+
+    if (access(args->input, 0)) {
+        printf("#>%s is no access!\n", args->input);
+        exit(-1);
+    }
+
+    __show_filesize_arguments(args);
+    return 0;
+}
+
+static int __number_to_string(uint32_t num, char format, char *buf, uint32_t buf_size, uint32_t *len)
+{
+    if (format == 'M') {
+        char *p = SIZE_TO_HUMAN_READABLE(num);
+        *len = strlen(p) + 1;
+        if (buf_size < *len + 1) {  /*add '\n' at the string end*/
+            printf("#>buf_size %d is not enough!\n", buf_size);
+            return -1;
+        }
+
+        strncpy(buf, p, buf_size);
+    } else {
+        if (format == 'H')
+            *len = snprintf(buf, buf_size, "0x%08X", num) + 1;
+        else
+            *len = snprintf(buf, buf_size, "%d", num) + 1;
+    }
+
+    buf[*len] = '\n';
+    *len += 1;
+    return 0;
+}
+
+int filesize_proc(struct arguments *arg)
+{
+    FILE *fsrc, *fdst = NULL;
+    size_t fsize, rw_len;
+    char str[64];
+    uint32_t str_len;
+    int ret = -1;
+
+    fsrc = fopen(arg->input, "rb");
+    assert(fsrc != NULL);
+    if (arg->output) {
+        fdst = fopen(arg->output, "w+");
+        assert(fdst != NULL);
+    }
+
+    fsize = __get_fsize(fsrc);
+    if (arg->private == 'H')
+        printf("$>%s size: 0x%08lX\n", arg->input, fsize);
+    else if (arg->private == 'M')
+        printf("$>%s size: %s\n", arg->input, SIZE_TO_HUMAN_READABLE((uint32_t)fsize));
+    else
+        printf("$>%s size: %ld\n", arg->input, fsize);
+
+    if (fdst) {
+        if (__number_to_string((uint32_t)fsize, (char)(arg->private & 0xFF), str, sizeof(str), &str_len))
+            goto __exit;
+
+        fseek(fdst, 0, SEEK_SET);
+        rw_len = fwrite(str, 1, str_len, fdst);
+        if (rw_len != str_len) {
+            printf("#>write data to dest_file failed[wanted:%d,actual:%ld]!\n", str_len, rw_len);
+            goto __exit;
+        }
+    }
+    ret = 0;
 
 __exit:
     if (fdst)
