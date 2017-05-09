@@ -4,8 +4,6 @@ INCLUDES := ./src
 
 sources := $(shell find $(SRC_DIR) -name "*.c")
 
-#sources = ./src/main.c ./src/func.c
-
 target = image+
 CFLAGS = -Wall -O0 -g -I. -I./src
 dirs = main

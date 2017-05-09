@@ -20,141 +20,7 @@
 #include "func.h"
 #include "main.h"
 #include "crc.h"
-
-#define MAX_NUMERICAL_PARAM_LEN     10
-#define IS_IN_a_TO_f(c) (((c) >= 'a') && ((c) <= 'f'))
-#define IS_IN_A_TO_F(c) (((c) >= 'A') && ((c) <= 'F'))
-#define IS_IN_0_TO_9(c) (((c) >= '0') && ((c) <= '9'))
-
-static char *SIZE_TO_HUMAN_READABLE(uint32_t size)
-{
-#define S_KB    1024
-#define S_MB    (S_KB * 1024)
-#define S_GB    (S_MB * 1024)
-    static char vb[64];
-    uint32_t GB = size / S_GB;
-    uint32_t MB = (size % S_GB) / S_MB;
-    uint32_t KB = (size % S_MB) / S_KB;
-    uint32_t BYTES = (size % S_KB);
-    int c = 0;
-
-    memset(vb, 0, sizeof(vb));
-    if (GB)
-        c += snprintf(vb, sizeof(vb), "%dGB.", GB);
-    if (MB)
-        c += snprintf(vb + c, sizeof(vb) - c, "%dMB.", MB);
-    if (KB)
-        c += snprintf(vb + c, sizeof(vb) - c, "%dKB.", KB);
-    if (BYTES)
-        c += snprintf(vb + c, sizeof(vb) - c, "%dBytes", BYTES);
-
-    return vb;
-}
-
-static int __find_numerical_start(char *str, int str_len, int *start_pos, int *is_hex)
-{
-    if (str_len > MAX_NUMERICAL_PARAM_LEN || str_len < 1)
-        return -1;
-
-    if (str_len == 1) {
-        if (!IS_IN_0_TO_9(str[0]))
-            return -1;
-
-        *start_pos = 0;
-        *is_hex = 0;
-        return 0;
-    }
-
-    if (str_len > 1) {
-        if (str[0] == '0') {
-            if (str[1] == 'x' || str[1] == 'X') {
-                *start_pos = 2;
-                *is_hex = 1;
-            } else {
-                *start_pos = 0;
-                *is_hex = 0;
-            }
-
-            return 0;
-        } else {
-            if (IS_IN_0_TO_9(str[0])) {
-                *start_pos = 0;
-                *is_hex = 0;
-                return 0;
-            }
-        }
-    }
-
-    return -1;
-}
-
-static int __check_validity_data(char *str, int start_pos, int is_hex)
-{
-    char *p = str + start_pos;
-
-    if (is_hex) {
-        while(*p != '\0') {
-            if (!(IS_IN_a_TO_f(*p) || IS_IN_A_TO_F(*p) || IS_IN_0_TO_9(*p)))
-                return -1;
-            p++;
-        }
-    } else {
-        while(*p != '\0') {
-            if (!IS_IN_0_TO_9(*p))
-                return -1;
-            p++;
-        }
-    }
-
-    return p - (str + start_pos);
-}
-
-static unsigned char __char2hex(char c)
-{
-    if (IS_IN_0_TO_9(c))
-        return c - '0';
-    if (IS_IN_A_TO_F(c))
-        return c - 'A' + 10;
-    if (IS_IN_a_TO_f(c))
-        return c - 'a' + 10;
-
-    return 0;
-}
-
-int str2word(char *str, uint32_t *word)
-{
-    size_t str_len = strlen(str);
-    int i, start_pos, is_hex, valid_len;
-    uint64_t value = 0;
-    uint8_t multiple;
-
-    if (!str)
-        return -1;
-
-    if (__find_numerical_start(str, str_len, &start_pos, &is_hex)) {
-        printf("#>find numerical start failed!\n");
-        return -1;
-    }
-
-    valid_len = __check_validity_data(str, start_pos, is_hex);
-    if (valid_len < 0)
-        return -1;
-
-    multiple = (is_hex) ? 16 : 10;
-    for (i = 0; i < valid_len; i++) {
-        value *= multiple;
-        value += __char2hex(str[start_pos + i]);
-        if (!is_hex) {
-            if (value > (uint64_t)0xFFFFFFFF) {
-                printf("#>decimal data %s overflow!\n", str);
-                return -1;
-            }
-        }
-    }
-    *word = (uint32_t)value;
-
-    return 0;
-}
+#include "common_api.h"
 
 static size_t __get_fsize(FILE *fp)
 {
@@ -479,20 +345,6 @@ struct cc_info {
     uint32_t value[4];
 };
 
-/*
-static struct cmd_type *__seek_type(char *str)
-{
-    struct cmd_type *p = g_cmd_table;
-
-    while(p->name) {
-        if (!strcmp(p->name, str))
-            return p;
-        p++;
-    }
-
-    return NULL;
-}
-*/
 static int32_t __seek_type(char *str, struct cmd_type **dst)
 {
     struct cmd_type *p = g_cmd_table;
@@ -646,20 +498,6 @@ static void calculate_crc16(struct cc_info *p, uint32_t *base, int32_t bytes)
 {
 }
 
-static void __dump_hex(unsigned char *src, int count)
-{
-    int i;
-
-    printf("$$$$$$$$$$$$$$$$>dump hex:\r\n");
-    for (i = 0; i < count; i++) {
-        if (!(i % 16))
-            printf("[%08X]", i);
-        printf("%02X ", src[i]);
-        if (!((i + 1) % 16))
-            printf("\n");
-    }
-}
-
 static int __write_to_buffer(uint32_t *dest, struct cc_info *pinfo, int count)
 {
     struct cc_info *pi = pinfo;
@@ -775,7 +613,7 @@ int create_proc(struct arguments *args)
 
     fdst = fopen(args->output, "wb+");
     assert(fdst != NULL);
-    __dump_hex(buf, (args->size > 256) ? 256 : args->size);
+    dump_bytes("BYTES", 1, buf, (args->size > 256) ? 256 : args->size);
 
     fseek(fdst, 0, SEEK_SET);
     rw_len = fwrite(buf, 1, args->size, fdst);
